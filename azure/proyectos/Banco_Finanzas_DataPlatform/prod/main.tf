@@ -56,8 +56,9 @@ resource "azurerm_resource_group" "rg_data" {
   tags     = local.common_tags
 
   # WAF: Resource locks para producción
+  # Note: Para non-prod, comentar este bloque antes de destroy
   lifecycle {
-    prevent_destroy = var.environment == "prod" ? true : false
+    prevent_destroy = true
   }
 }
 
@@ -133,7 +134,7 @@ resource "azurerm_storage_account" "datalake" {
   })
 
   lifecycle {
-    prevent_destroy = var.environment == "prod" ? true : false
+    prevent_destroy = true
 
     ignore_changes = [
       # Ignorar cambios en tags de tracking automático
