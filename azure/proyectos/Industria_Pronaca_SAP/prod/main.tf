@@ -1,9 +1,3 @@
-# --------------------------------------------------------------------------------------------------
-# Created by Ronny
-# Project: Industria Pronaca SAP Migration
-# License: MIT
-# --------------------------------------------------------------------------------------------------
-
 terraform {
   required_providers {
     azurerm = {
@@ -17,21 +11,32 @@ provider "azurerm" {
   features {}
 }
 
+# Tags comunes para el proyecto SAP
+locals {
+  common_tags = {
+    ManagedBy   = "Terraform"
+    Environment = var.environment
+    Owner       = "Ronny Ortiz"
+    Project     = "SAP-Migration-Pronaca"
+    Criticality = "High"
+  }
+}
+
 resource "azurerm_resource_group" "rg_sap" {
-  name     = "rg-pronaca-sap-prod"
-  location = "East US 2"
+  name     = "rg-pronaca-sap-${var.environment}"
+  location = var.location
+  tags     = local.common_tags
 }
 
 # --------------------------------------------------------------------------------------------------
 # NETWORKING (Módulo Modular)
 # --------------------------------------------------------------------------------------------------
-# Corrección: Ruta relativa ajustada (3 niveles arriba)
 module "networking" {
   source = "../../../modules/networking"
 
   resource_group_name = azurerm_resource_group.rg_sap.name
   location            = azurerm_resource_group.rg_sap.location
-  vnet_name           = "vnet-sap-prod"
+  vnet_name           = "vnet-sap-${var.environment}"
   address_space       = ["10.150.0.0/16"]
 
   subnets = {
@@ -44,13 +49,13 @@ module "networking" {
 # LATENCIA ULTRABAJA (Proximity Placement Group)
 # --------------------------------------------------------------------------------------------------
 resource "azurerm_proximity_placement_group" "sap_ppg" {
-  name                = "ppg-sap-hana-prod"
+  name                = "ppg-sap-hana-${var.environment}"
   location            = azurerm_resource_group.rg_sap.location
   resource_group_name = azurerm_resource_group.rg_sap.name
 
-  tags = {
+  tags = merge(local.common_tags, {
     Workload = "SAP S/4HANA"
-  }
+  })
 }
 
 # --------------------------------------------------------------------------------------------------
@@ -67,6 +72,8 @@ resource "azurerm_network_interface" "hana_nic" {
     subnet_id                     = module.networking.subnet_ids["snet-sap-db"]
     private_ip_address_allocation = "Dynamic"
   }
+
+  tags = local.common_tags
 }
 
 resource "azurerm_linux_virtual_machine" "hana_db" {
@@ -82,6 +89,12 @@ resource "azurerm_linux_virtual_machine" "hana_db" {
     azurerm_network_interface.hana_nic.id
   ]
 
+  # Configuración de SSH Key (SEGURO - No password-based auth)
+  admin_ssh_key {
+    username   = "sapadmin"
+    public_key = var.admin_ssh_public_key
+  }
+
   os_disk {
     caching              = "ReadWrite"
     storage_account_type = "Premium_LRS" # OS disk debe ser Premium/Standard, no UltraSSD
@@ -93,4 +106,8 @@ resource "azurerm_linux_virtual_machine" "hana_db" {
     sku       = "15-SP2"
     version   = "latest"
   }
+
+  tags = merge(local.common_tags, {
+    Role = "SAP-HANA-Database"
+  })
 }

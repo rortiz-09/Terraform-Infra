@@ -1,0 +1,31 @@
+# --------------------------------------------------------------------------------------------------
+# Ejemplo de Configuración de Variables - Banco Finanzas
+# IMPORTANTE: Este archivo NO debe commitearse a Git (.gitignore lo excluye)
+# --------------------------------------------------------------------------------------------------
+
+# Ambiente
+environment = "prod"
+
+# Ubicación
+location = "East US 2"
+
+# Centro de Costos
+cost_center = "RiesgoCrediticio"
+
+# Credenciales SQL (NUNCA commitear este archivo con valores reales)
+sql_administrator_login = "sqladminuser"
+
+# OPCIÓN 1: Pasar desde línea de comando
+# terraform apply -var="sql_administrator_password=TU_PASSWORD_SEGURO"
+
+# OPCIÓN 2: Usar Azure Key Vault (RECOMENDADO para producción)
+# data "azurerm_key_vault_secret" "sql_password" {
+#   name         = "sql-admin-password"
+#   key_vault_id = "/subscriptions/.../vaults/kv-banco-secrets"
+# }
+
+# OPCIÓN 3: Variable de entorno (para CI/CD)
+# export TF_VAR_sql_administrator_password="password_from_vault"
+
+# NUNCA hacer esto en producción:
+# sql_administrator_password = "P@ssw0rdSeguro123!"  # ❌ INSEGURO

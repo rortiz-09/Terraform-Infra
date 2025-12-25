@@ -11,20 +11,38 @@ terraform {
       version = "~> 3.0"
     }
   }
+
+  # Backend remoto - Descomentar y configurar para producción
+  # backend "azurerm" {
+  #   resource_group_name  = "rg-terraform-state"
+  #   storage_account_name = "sttfstatebancoprod"
+  #   container_name       = "tfstate"
+  #   key                  = "banco-finanzas.terraform.tfstate"
+  # }
 }
 
 provider "azurerm" {
   features {}
 }
 
-resource "azurerm_resource_group" "rg_data" {
-  name     = "rg-banco-data-analytics-prod"
-  location = "East US 2"
-  tags = {
-    Owner      = "CISO Office"
-    CostCenter = "RiesgoCrediticio"
-    Compliance = "PCI-DSS/SOX"
+# --------------------------------------------------------------------------------------------------
+# TAGS COMUNES (Estrategia de Etiquetado Consistente)
+# --------------------------------------------------------------------------------------------------
+locals {
+  common_tags = {
+    ManagedBy   = "Terraform"
+    Environment = var.environment
+    Owner       = "Ronny Ortiz"
+    CostCenter  = var.cost_center
+    Compliance  = "PCI-DSS/SOX"
+    Project     = "Banco-DataPlatform"
   }
+}
+
+resource "azurerm_resource_group" "rg_data" {
+  name     = "rg-banco-data-analytics-${var.environment}"
+  location = var.location
+  tags     = local.common_tags
 }
 
 # --------------------------------------------------------------------------------------------------
@@ -35,11 +53,11 @@ module "networking" {
 
   resource_group_name = azurerm_resource_group.rg_data.name
   location            = azurerm_resource_group.rg_data.location
-  vnet_name           = "vnet-banco-analytics-prod"
+  vnet_name           = "vnet-banco-analytics-${var.environment}"
   address_space       = ["10.180.0.0/16"]
 
   subnets = {
-    "snet-data-endpoints" = "10.180.10.0/24" # Para Private Endpoints futuros
+    "snet-data-endpoints" = "10.180.10.0/24"
   }
 }
 
@@ -47,7 +65,7 @@ module "networking" {
 # ALMACENAMIENTO SEGURO (Data Lake Gen2)
 # --------------------------------------------------------------------------------------------------
 resource "azurerm_storage_account" "datalake" {
-  name                     = "stbancodatalakeprod"
+  name                     = "stbancodatalake${var.environment}"
   resource_group_name      = azurerm_resource_group.rg_data.name
   location                 = azurerm_resource_group.rg_data.location
   account_tier             = "Standard"
@@ -58,6 +76,8 @@ resource "azurerm_storage_account" "datalake" {
     default_action = "Deny"
     bypass         = ["AzureServices"]
   }
+
+  tags = local.common_tags
 }
 
 resource "azurerm_storage_data_lake_gen2_filesystem" "users" {
@@ -69,12 +89,12 @@ resource "azurerm_storage_data_lake_gen2_filesystem" "users" {
 # ANALÍTICA AVANZADA (Azure Synapse Analytics)
 # --------------------------------------------------------------------------------------------------
 resource "azurerm_synapse_workspace" "analytics" {
-  name                                 = "syn-banco-riesgo-prod"
+  name                                 = "syn-banco-riesgo-${var.environment}"
   resource_group_name                  = azurerm_resource_group.rg_data.name
   location                             = azurerm_resource_group.rg_data.location
   storage_data_lake_gen2_filesystem_id = azurerm_storage_data_lake_gen2_filesystem.users.id
-  sql_administrator_login              = "sqladminuser"
-  sql_administrator_login_password     = "P@ssw0rdSeguro123!"
+  sql_administrator_login              = var.sql_administrator_login
+  sql_administrator_login_password     = var.sql_administrator_password # Variable sensible
 
   managed_virtual_network_enabled = true
   public_network_access_enabled   = false
@@ -82,6 +102,8 @@ resource "azurerm_synapse_workspace" "analytics" {
   identity {
     type = "SystemAssigned"
   }
+
+  tags = local.common_tags
 }
 
 # Asignar permisos a la identidad de Synapse sobre el Data Lake
@@ -96,4 +118,6 @@ resource "azurerm_synapse_sql_pool" "risk_pool" {
   synapse_workspace_id = azurerm_synapse_workspace.analytics.id
   sku_name             = "DW1000c"
   create_mode          = "Default"
+
+  tags = local.common_tags
 }
