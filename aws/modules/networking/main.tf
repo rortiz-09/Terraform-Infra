@@ -1,22 +1,8 @@
-variable "vpc_cidr" {
-  description = "CIDR block para la VPC"
-  type        = string
-}
-
-variable "project_name" {
-  description = "Nombre del proyecto para etiquetado"
-  type        = string
-}
-
-variable "environment" {
-  description = "Ambiente de despliegue (dev, test, prod)"
-  type        = string
-}
-
-variable "availability_zones" {
-  description = "Lista de zonas de disponibilidad a usar"
-  type        = list(string)
-}
+# --------------------------------------------------------------------------------------------------
+# Módulo de Networking AWS - Arquitectura 3-Tier VPC
+# Autor: Ronny
+# Descripción: Crea una VPC con arquitectura de 3 capas (Public, App, Data)
+# --------------------------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------------------------------
 # VPC BASE (Networking Core)
@@ -105,17 +91,4 @@ resource "aws_nat_gateway" "main" {
   tags = {
     Name = "nat-${var.project_name}-${var.environment}-${count.index}"
   }
-}
-
-# Salidas
-output "vpc_id" {
-  value = aws_vpc.main.id
-}
-
-output "public_subnets" {
-  value = aws_subnet.public[*].id
-}
-
-output "app_subnets" {
-  value = aws_subnet.app[*].id
 }

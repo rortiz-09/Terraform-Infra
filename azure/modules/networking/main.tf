@@ -1,11 +1,8 @@
-variable "resource_group_name" { type = string }
-variable "location" { type = string }
-variable "vnet_name" { type = string }
-variable "address_space" { type = list(string) }
-variable "subnets" {
-  description = "Mapa de subnets a crear (nombre = prefijo)"
-  type        = map(string)
-}
+# --------------------------------------------------------------------------------------------------
+# Módulo de Networking Azure - VNet y Subnets
+# Autor: Ronny
+# Descripción: Crea Virtual Network con subnets dinámicos y NSG baseline
+# --------------------------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------------------------------
 # VIRTUAL NETWORK (Base Connectivity)
@@ -47,9 +44,4 @@ resource "azurerm_network_security_group" "nsg_default" {
     source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
-}
-
-output "vnet_id" { value = azurerm_virtual_network.vnet.id }
-output "subnet_ids" {
-  value = { for k, v in azurerm_subnet.subnet : k => v.id }
 }
