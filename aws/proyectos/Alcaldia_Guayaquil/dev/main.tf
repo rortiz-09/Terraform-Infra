@@ -80,14 +80,3 @@ output "networking_summary" {
     ipam_summary    = module.networking.ipam_summary
   }
 }
-
-# Recursos adicionales para este ambiente (ej. Instancia Bastion pequeña)
-resource "aws_instance" "bastion_dev" {
-  ami           = "ami-12345678"
-  instance_type = "t3.micro"
-  subnet_id     = module.networking_dev.public_subnets[0]
-
-  tags = {
-    Name = "srv-bastion-dev"
-  }
-}
