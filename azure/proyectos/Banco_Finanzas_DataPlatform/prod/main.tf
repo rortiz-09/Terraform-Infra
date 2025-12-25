@@ -174,7 +174,7 @@ resource "azurerm_synapse_workspace" "analytics" {
   tags = local.common_tags
 
   lifecycle {
-    prevent_destroy = var.environment == "prod" ? true : false
+    prevent_destroy = true
   }
 }
 
@@ -194,7 +194,7 @@ resource "azurerm_synapse_sql_pool" "risk_pool" {
   tags = local.common_tags
 
   lifecycle {
-    prevent_destroy = var.environment == "prod" ? true : false
+    prevent_destroy = true
   }
 }
 
