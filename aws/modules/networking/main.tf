@@ -1,36 +1,75 @@
 # ==================================================================================================
-# MÓDULO DE NETWORKING AWS - ARQUITECTURA 3-TIER VPC
+# MÓDULO DE NETWORKING AWS - ARQUITECTURA 3-TIER CON IPAM
 # ==================================================================================================
 # Autor: Ronny Ortiz
-# Propósito: Crear una VPC con arquitectura de 3 capas para segregación de seguridad
-# Capas: Public (ALB/Bastion), App (Servidores), Data (Bases de Datos)
+# Propósito: VPC enterprise con segmentación Public/App/Data y IPAM integration
+# Patrón: Hub-Spoke ready con Transit Gateway support
 # ==================================================================================================
 
+variable "vpc_cidr" {
+  description = "CIDR block del VPC (debe estar en IPAM registry)"
+  type        = string
+}
+
+variable "project_name" {
+  description = "Nombre del proyecto"
+  type        = string
+}
+
+variable "environment" {
+  description = "Ambiente (dev, staging, prod)"
+  type        = string
+}
+
+variable "availability_zones" {
+  description = "Lista de AZs para multi-AZ deployment"
+  type        = list(string)
+}
+
+variable "enable_nat_gateway" {
+  description = "Habilitar NAT Gateway para subnets privados"
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway" {
+  description = "Usar un solo NAT Gateway (cost saving para dev)"
+  type        = bool
+  default     = false
+}
+
 # --------------------------------------------------------------------------------------------------
-# VPC PRINCIPAL
+# IPAM CALCULATOR - AUTO SUBNET CREATION
 # --------------------------------------------------------------------------------------------------
-# Crea la Virtual Private Cloud que contendrá todos los recursos de red.
-# - DNS habilitado para permitir resolución de nombres internos
-# - CIDR configurable vía variable para flexibilidad multi-ambiente
+module "ipam" {
+  source = "../../../modules/utility/ipam-calculator"
+
+  vpc_cidr           = var.vpc_cidr
+  availability_zones = var.availability_zones
+  enable_public_tier = true
+  enable_app_tier    = true
+  enable_data_tier   = true
+}
+
+# --------------------------------------------------------------------------------------------------
+# VPC
+# --------------------------------------------------------------------------------------------------
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
-  enable_dns_hostnames = true # Permite asignar nombres DNS a instancias EC2
-  enable_dns_support   = true # Habilita resolución DNS
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
   tags = {
     Name        = "vpc-${var.project_name}-${var.environment}"
     Environment = var.environment
-    ManagedBy   = "Terraform"
-    Compliance  = "PCI-DSS" # Segregación de redes requerida por PCI-DSS
+    Tier        = "Network"
   }
 }
 
 # --------------------------------------------------------------------------------------------------
-# INTERNET GATEWAY
+# INTERNET GATEWAY (Para Public Tier)
 # --------------------------------------------------------------------------------------------------
-# Proporciona acceso a Internet para recursos en subnets públicas.
-# Solo la capa pública tiene ruta directa al IGW.
-resource "aws_internet_gateway" "igw" {
+resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
@@ -39,72 +78,60 @@ resource "aws_internet_gateway" "igw" {
 }
 
 # --------------------------------------------------------------------------------------------------
-# SUBNETS - CAPA PÚBLICA
+# PUBLIC SUBNETS (Tier 1: ALB, NAT Gateway)
 # --------------------------------------------------------------------------------------------------
-# Subnets con acceso directo a Internet via IGW.
-# Uso típico: Application Load Balancers, NAT Gateways, Bastion Hosts
-# Se crea una subnet por cada AZ para alta disponibilidad
 resource "aws_subnet" "public" {
-  count             = length(var.availability_zones)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index) # /24 subnets
-  availability_zone = var.availability_zones[count.index]
+  count = length(module.ipam.public_subnets)
+
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = module.ipam.public_subnets[count.index]
+  availability_zone       = var.availability_zones[count.index]
+  map_public_ip_on_launch = true
 
   tags = {
-    Name = "snet-public-${var.environment}-${element(split("-", var.availability_zones[count.index]), 2)}"
+    Name = "${module.ipam.public_subnet_metadata[count.index].name}-${var.environment}"
     Tier = "Public"
   }
 }
 
 # --------------------------------------------------------------------------------------------------
-# SUBNETS - CAPA APLICACIÓN (PRIVADA)
+# APPLICATION SUBNETS (Tier 2: EC2, Containers)
 # --------------------------------------------------------------------------------------------------
-# Subnets privadas para servidores de aplicación.
-# - Sin acceso directo entrante desde Internet
-# - Salida a Internet via NAT Gateway para actualizaciones/APIs externas
-# - Offset de +10 en el tercer octeto para evitar colisiones
 resource "aws_subnet" "app" {
-  count             = length(var.availability_zones)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 10)
-  availability_zone = var.availability_zones[count.index]
+  count = length(module.ipam.app_subnets)
+
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = module.ipam.app_subnets[count.index]
+  availability_zone       = var.availability_zones[count.index]
+  map_public_ip_on_launch = false
 
   tags = {
-    Name = "snet-app-${var.environment}-${element(split("-", var.availability_zones[count.index]), 2)}"
-    Tier = "App"
+    Name = "${module.ipam.app_subnet_metadata[count.index].name}-${var.environment}"
+    Tier = "Application"
   }
 }
 
 # --------------------------------------------------------------------------------------------------
-# SUBNETS - CAPA DATOS (AISLADA)
+# DATA SUBNETS (Tier 3: RDS, ElastiCache)
 # --------------------------------------------------------------------------------------------------
-# Subnets completamente privadas para bases de datos.
-# - Sin salida a Internet por defecto (máxima seguridad)
-# - Acceso solo desde capa App via Security Groups
-# - Offset de +20 para separación clara
 resource "aws_subnet" "data" {
-  count             = length(var.availability_zones)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 20)
-  availability_zone = var.availability_zones[count.index]
+  count = length(module.ipam.data_subnets)
+
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = module.ipam.data_subnets[count.index]
+  availability_zone       = var.availability_zones[count.index]
+  map_public_ip_on_launch = false
 
   tags = {
-    Name = "snet-data-${var.environment}-${element(split("-", var.availability_zones[count.index]), 2)}"
+    Name = "${module.ipam.data_subnet_metadata[count.index].name}-${var.environment}"
     Tier = "Data"
   }
 }
 
 # --------------------------------------------------------------------------------------------------
-# NAT GATEWAY - SALIDA SEGURA A INTERNET
+# NAT GATEWAYS (Para outbound Internet desde subnets privados)
 # --------------------------------------------------------------------------------------------------
-# Permite que recursos en subnets privadas accedan a Internet de forma segura.
-# - Una IP elástica por NAT Gateway para IP fija de salida
-# - Desplegado en subnet pública para tener acceso al IGW
-# - Costo: Se recomienda 1 por AZ en prod, 1 total en dev para ahorrar
 resource "aws_eip" "nat" {
-  count  = length(var.availability_zones)
-  domain = "vpc" # Especifica que es para VPC, no EC2-Classic
-
   tags = {
     Name = "eip-nat-${var.project_name}-${var.environment}-az${count.index + 1}"
   }
